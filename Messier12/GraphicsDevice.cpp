@@ -21,7 +21,7 @@ inline void ThrowIfFailed(HRESULT hr)
 #if defined(_DEBUG)
 		throw std::exception();
 #endif
-		
+
 		std::exit(-1);
 	}
 }
@@ -42,6 +42,12 @@ void GraphicsDevice::InitializePipeline()
 	ComPtr<IDXGIAdapter1> hardwareAdapter;
 
 	hardwareAdapter = nullptr;
+	SIZE_T prevHighestMem = 0;
+	UINT highestMemAdapter = 0;
+	UINT highestMemAdapterScore = 0;
+	UINT likelyPowerfulAdapter = 0;
+	UINT likelyPowerfulAdapterScore = 0;
+
 	for (UINT adapterIndex = 0; ; ++adapterIndex)
 	{
 		IDXGIAdapter1* pAdapter = nullptr;
@@ -55,11 +61,54 @@ void GraphicsDevice::InitializePipeline()
 		// actual device yet.
 		if (SUCCEEDED(D3D12CreateDevice(pAdapter, D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr)))
 		{
-			hardwareAdapter = pAdapter;
+			DXGI_ADAPTER_DESC desc = {};
+			pAdapter->GetDesc(&desc);
+
+			if (desc.VendorId == 0x8086 && likelyPowerfulAdapterScore <= 1)
+			{
+				likelyPowerfulAdapter = adapterIndex;
+				likelyPowerfulAdapterScore = 1;
+			}
+			else if (desc.VendorId == 0x1022 && likelyPowerfulAdapterScore <= 2)
+			{
+				likelyPowerfulAdapter = adapterIndex;
+				likelyPowerfulAdapterScore = 2;
+			}
+			else if (desc.VendorId == 0x10DE && likelyPowerfulAdapterScore <= 2) {
+				likelyPowerfulAdapter = adapterIndex;
+				likelyPowerfulAdapterScore = 2;
+			}
+			else if (likelyPowerfulAdapterScore <= 1)
+			{
+				likelyPowerfulAdapter = adapterIndex;
+				likelyPowerfulAdapterScore = 1;
+			}
+
+			if (desc.DedicatedVideoMemory > prevHighestMem) {
+				highestMemAdapter = adapterIndex;
+				prevHighestMem = desc.DedicatedVideoMemory;
+				highestMemAdapterScore =
+					(desc.VendorId == 0x8086) ? 1 : (desc.VendorId == 0x1022 || desc.VendorId == 0x10DE) ? 2 : 1;
+			}
 		}
 		else {
 			pAdapter->Release();
 		}
+	}
+
+	if (highestMemAdapter == likelyPowerfulAdapter)
+	{
+		//Select the unanimous winner
+		factory->EnumAdapters1(highestMemAdapter, &hardwareAdapter);
+	}
+	else if (likelyPowerfulAdapterScore > highestMemAdapterScore)
+	{
+		//Select likely powerful adapter
+		factory->EnumAdapters1(likelyPowerfulAdapter, &hardwareAdapter);
+	}
+	else {
+		//Select highest memory adapter
+		factory->EnumAdapters1(highestMemAdapter, &hardwareAdapter);
 	}
 
 	ThrowIfFailed(D3D12CreateDevice(hardwareAdapter.Get(), D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS(&m_device)));
